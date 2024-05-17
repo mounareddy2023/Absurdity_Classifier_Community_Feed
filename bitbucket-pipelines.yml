@@ -1,6 +1,6 @@
 #Pipeline-absurdity_classifier
 image:
-  name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/absurdity_classifier:latest1
+  name: 453453.dkr.ecr.ap-south-1.amazonaws.com/absurdity_classifier:latest1
   aws:
     access-key: $AWS_ACCESS_KEY_ID
     secret-key: $AWS_SECRET_ACCESS_KEY
@@ -48,7 +48,7 @@ definitions:
     - step: &deployment-step
         name: Deployment
         image:
-          name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+          name: 453453.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
           aws:
             access-key: $AWS_ACCESS_KEY_ID
             secret-key: $AWS_SECRET_ACCESS_KEY
@@ -94,7 +94,7 @@ pipelines:
             - docker
           name: trivy run
           image:
-              name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/trivy:html
+              name: 453453.dkr.ecr.ap-south-1.amazonaws.com/trivy:html
               aws:
                 access-key: $AWS_ACCESS_KEY_ID
                 secret-key: $AWS_SECRET_ACCESS_KEY
@@ -142,7 +142,7 @@ pipelines:
           trigger: manual
           deployment: Production
           image:
-            name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+            name: 453453.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
             aws:
               access-key: $AWS_ACCESS_KEY_ID
               secret-key: $AWS_SECRET_ACCESS_KEY
@@ -177,7 +177,7 @@ pipelines:
           name: Deploy to PreProd
           deployment: Preprod
           image:
-            name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+            name: 453453.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
             aws:
               access-key: $AWS_ACCESS_KEY_ID
               secret-key: $AWS_SECRET_ACCESS_KEY
