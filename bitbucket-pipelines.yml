@@ -1,0 +1,204 @@
+#Pipeline-absurdity_classifier
+image:
+  name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/absurdity_classifier:latest1
+  aws:
+    access-key: $AWS_ACCESS_KEY_ID
+    secret-key: $AWS_SECRET_ACCESS_KEY
+
+clone:
+  depth: full
+
+definitions:
+  # Caching sonarqube artifacts will speed up your build
+  caches:
+    sonar: ~/.sonar/cache
+  services:
+    mongo:
+      image: mongo:3.4-xenial
+    docker:
+      memory: 3072
+
+  steps:
+    - step: &sonarqube
+        name: sonarQube analysis
+        script: 
+          - printf "$projectKey" > sonar-project.properties
+          - pip3 install -r requirements.txt
+          #- npm install
+          - pipe: sonarsource/sonarqube-scan:1.2.0
+            variables:
+                SONAR_HOST_URL: ${SONAR_HOST_URL}
+                SONAR_TOKEN: ${S_TOKEN}
+          #- pipe: sonarsource/sonarqube-quality-gate:1.1.0
+            #variables:
+              #SONAR_TOKEN: ${S_TOKEN}
+
+    - step: &unit-test-cases
+        name: Build and run Unit test cases
+        script:
+         #CONFIG
+          - printf "$sec_dev" > sec_dev.sh
+          - chmod 777 sec_dev.sh
+          - ./sec_dev.sh  "$SECRET_Dev" "$CONFIG_Path" "$DB_Path" "$Code_IN"
+          - npm install
+          - npm run test
+        services:
+          - mongo
+
+    - step: &deployment-step
+        name: Deployment
+        image:
+          name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+          aws:
+            access-key: $AWS_ACCESS_KEY_ID
+            secret-key: $AWS_SECRET_ACCESS_KEY
+        services:
+          - docker
+        caches:
+          - docker
+        script:
+          #CONFIG
+          - printf "$sec_alpha" > sec_alpha.sh
+          - chmod 777 sec_alpha.sh
+          - ./sec_alpha.sh "$SECRET_Dev" "$SECRET_Alpha" "$CONFIG_Path" "$DB_Path" "$Code_IN"
+
+          #ECR_PIPE
+          - printf "$ECR_PIPE" >> pipe.sh
+          - chmod 755 pipe.sh
+          - ./pipe.sh
+
+    - step: &checkconsolelog
+        name: Preventing Console Log
+        script:
+          - cd .
+          - if grep -rwi console.log --include='*.js' --include='*.ts' $BITBUCKET_CLONE_DIR/* >/dev/null 2>&1 ; then echo 'console.log observed' && findconsolelog=$(grep -rwi console.log --include='*.js' --include='*.ts' $BITBUCKET_CLONE_DIR/*); else echo 'No console.log observed'; fi
+          #- echo $findconsolelog
+          - echo "$findconsolelog" > withCommentedConsoleLog.txt
+          - cat withCommentedConsoleLog.txt
+          - grep -i -v -E '(\/\/)(.*)(console.log)' withCommentedConsoleLog.txt > uncommenedConsoleLog.txt
+          - cat uncommenedConsoleLog.txt
+          - status=0
+          - if egrep -w 'console.log' uncommenedConsoleLog.txt >/dev/null 2>&1 ; then echo 'There are console.log used in this branch files resulting in stopping the deployment' && status=1; else echo 'No console observed'; fi
+          - exit $status
+pipelines:
+  default:
+    - parallel:
+        - step: *sonarqube
+
+        #- step: *unit-test-cases
+
+  branches:
+    trivy:
+       - step:
+          services:
+            - docker
+          name: trivy run
+          image:
+              name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/trivy:html
+              aws:
+                access-key: $AWS_ACCESS_KEY_ID
+                secret-key: $AWS_SECRET_ACCESS_KEY
+          script:
+                    - echo -e $trivy_script > trivy_scan.sh
+                    - bash trivy_scan.sh "absurdity_classifier"
+    development:
+      - parallel:
+          - step: *sonarqube
+
+          #- step: *unit-test-cases
+
+          #- step: *checkconsolelog
+
+      - step:
+          <<: *deployment-step
+          deployment: Development
+
+    alpha:
+      - parallel:
+          - step: *sonarqube
+
+          #- step: *unit-test-cases
+
+          #- step: *checkconsolelog
+
+      - step:
+          <<: *deployment-step
+          deployment: Alpha
+
+    master:
+      - step:
+          name: This step runs on master branch
+          script:
+            - echo "This script runs on master branch'."
+
+      #- step: *sonarqube
+
+      #- step: *unit-test-cases
+
+      #- step: *checkconsolelog
+
+      - step:
+          name: Deploy to Production
+          trigger: manual
+          deployment: Production
+          image:
+            name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+            aws:
+              access-key: $AWS_ACCESS_KEY_ID
+              secret-key: $AWS_SECRET_ACCESS_KEY
+          services:
+            - docker
+          caches:
+            - docker
+
+          script:
+            #CONFIG
+            - printf "$sec_prod" > sec_prod.sh
+            - chmod 777 sec_prod.sh
+            - ./sec_prod.sh  "$SECRET_Prod" "$CONFIG_Path" "$DB_Path"
+            - printf "$ECR_PROD_PIPE" >> prodpipe.sh
+            - chmod 755 prodpipe.sh
+            - ./prodpipe.sh
+
+            - pipe: atlassian/aws-ecs-deploy:1.1.4
+              variables:
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
+                CLUSTER_NAME: $CLUSTER_NAME
+                SERVICE_NAME: $SERVICE_NAME
+                TASK_DEFINITION: "task.json"
+    preprod:
+      - step:
+          name: This step runs on preprod branch
+          script:
+            - echo "This script runs on preprod branch'."
+      - step:
+          name: Deploy to PreProd
+          deployment: Preprod
+          image:
+            name: 616035352558.dkr.ecr.ap-south-1.amazonaws.com/ecr-pipe:latest
+            aws:
+              access-key: $AWS_ACCESS_KEY_ID
+              secret-key: $AWS_SECRET_ACCESS_KEY
+          services:
+            - docker
+          caches:
+            - docker
+          script:
+            - printf "$sec_preprod" > sec_preprod.sh
+            - chmod 755 sec_preprod.sh
+            - ./sec_preprod.sh "$SECRET_Preprod" "$CONFIG_Path" "$DB_Path"
+            
+            - printf "$ECR_PRE_PROD_PIPE" >> preprodpipe.sh
+            - chmod 755 preprodpipe.sh
+            - ./preprodpipe.sh
+            - pipe: atlassian/aws-ecs-deploy:1.1.4
+              variables:
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_DEFAULT_REGION: $PRE_PROD_AWS_DEFAULT_REGION
+                CLUSTER_NAME: $PRE_PROD_CLUSTER_NAME
+                SERVICE_NAME: $PRE_PROD_SERVICE_NAME
+                TASK_DEFINITION: task.json
+
